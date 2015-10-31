@@ -1,9 +1,10 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // License: GNU General Public License v3. See license.txt
 
+{% include "osmosis/custom_js_methods.js" %}
+
 frappe.provide("erpnext");
 cur_frm.email_field = "email_id";
-
 erpnext.LeadController = frappe.ui.form.Controller.extend({
 	setup: function() {
 		this.frm.fields_dict.customer.get_query = function(doc, cdt, cdn) {
