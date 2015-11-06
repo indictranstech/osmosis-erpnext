@@ -1,5 +1,6 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // License: GNU General Public License v3. See license.txt
+{% include "osmosis/custom_js_methods.js"%}
 
 frappe.ui.form.on("Project", {
 	onload: function(frm) {
@@ -58,16 +59,23 @@ cur_frm.fields_dict.customer.get_query = function(doc,cdt,cdn) {
 	}
 }
 
+// cur_frm.fields_dict['sales_order'].get_query = function(doc) {
+// 	var filters = {
+// 		'project_name': ["in", doc.__islocal ? [""] : [doc.name, ""]]
+// 	};
+
+// 	if (doc.customer) {
+// 		filters["customer"] = doc.customer;
+// 	}
+
+// 	return {
+// 		filters: filters
+// 	}
+// }
+
+
 cur_frm.fields_dict['sales_order'].get_query = function(doc) {
-	var filters = {
-		'project_name': ["in", doc.__islocal ? [""] : [doc.name, ""]]
-	};
-
-	if (doc.customer) {
-		filters["customer"] = doc.customer;
-	}
-
 	return {
-		filters: filters
+		filters: {"docstatus":1}
 	}
 }

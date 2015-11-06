@@ -293,6 +293,9 @@ class calculate_taxes_and_totals(object):
 		self.doc.total_taxes_and_charges = flt(self.doc.grand_total - self.doc.net_total,
 			self.doc.precision("total_taxes_and_charges"))
 
+		self.doc.grand_total = flt(self.doc.get("taxes")[-1].total - self.doc.buy_back_amount
+			if self.doc.get("taxes") else self.doc.net_total - self.doc.buy_back_amount)
+
 		self._set_in_company_currency(self.doc, ["total_taxes_and_charges"])
 
 		if self.doc.doctype in ["Quotation", "Sales Order", "Delivery Note", "Sales Invoice"]:

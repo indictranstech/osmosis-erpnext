@@ -2,6 +2,7 @@
 // License: GNU General Public License v3. See license.txt
 
 {% include 'selling/sales_common.js' %}
+{% include 'osmosis/custom_js_methods.js' %}
 
 frappe.ui.form.on("Sales Order", {
 	onload: function(frm) {
