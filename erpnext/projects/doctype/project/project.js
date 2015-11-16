@@ -1,6 +1,6 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // License: GNU General Public License v3. See license.txt
-{% include "osmosis/custom_js_methods.js"%}
+{% include "osmosis/custom_filters.js"%}
 
 frappe.ui.form.on("Project", {
 	onload: function(frm) {
@@ -72,10 +72,3 @@ cur_frm.fields_dict.customer.get_query = function(doc,cdt,cdn) {
 // 		filters: filters
 // 	}
 // }
-
-
-cur_frm.fields_dict['sales_order'].get_query = function(doc) {
-	return {
-		filters: {"docstatus":1}
-	}
-}
