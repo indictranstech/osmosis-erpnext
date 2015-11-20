@@ -3,6 +3,7 @@
 
 frappe.provide("erpnext.buying");
 
+{% include 'osmosis/custom_js_methods.js' %};
 {% include 'buying/doctype/purchase_common/purchase_common.js' %};
 
 frappe.ui.form.on("Purchase Order", {
