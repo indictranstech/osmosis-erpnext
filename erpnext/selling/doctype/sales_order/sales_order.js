@@ -33,8 +33,6 @@ erpnext.selling.SalesOrderController = erpnext.selling.SellingController.extend(
 					cur_frm.add_custom_button(__('Payment'), cur_frm.cscript.make_bank_entry);
 				}
 
-				cur_frm.add_custom_button(__('Extra Sales Order'), make_extra_sales_order);
-
 				// stop
 				if(flt(doc.per_delivered, 2) < 100 || doc.per_billed < 100)
 					cur_frm.add_custom_button(__('Stop'), cur_frm.cscript['Stop Sales Order'])
