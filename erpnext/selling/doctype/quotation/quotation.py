@@ -14,9 +14,6 @@ form_grid_templates = {
 
 class Quotation(SellingController):
 	def validate(self):
-		from osmosis.custom_methods import reduce_buyback_amount
-		reduce_buyback_amount(self)
-		
 		super(Quotation, self).validate()
 		self.set_status()
 		self.validate_order_type()
