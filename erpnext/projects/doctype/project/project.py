@@ -23,6 +23,7 @@ class Project(Document):
 					"start_date": task.exp_start_date,
 					"end_date": task.exp_end_date,
 					"description": task.description,
+					"against_sales_order":task.sales_order,
 					"task_id": task.name
 				})
 
@@ -60,6 +61,7 @@ class Project(Document):
 				"exp_start_date": t.start_date,
 				"exp_end_date": t.end_date,
 				"description": t.description,
+				"sales_order":t.against_sales_order
 			})
 
 			task.flags.ignore_links = True
