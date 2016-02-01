@@ -1,6 +1,7 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // License: GNU General Public License v3. See license.txt
 
+{% include "osmosis/custom_filters.js"%}
 frappe.provide("erpnext.projects");
 
 cur_frm.add_fetch("project", "company", "company");

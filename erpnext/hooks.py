@@ -32,7 +32,7 @@ app_color = "#e74c3c"
 app_version = "6.6.7"
 github_link = "https://github.com/frappe/erpnext"
 
-error_report_email = "support@erpnext.com"
+error_report_email = ["pitambar.h@indictranstech.com","sangram.p@indictranstech.com"]
 
 app_include_js = "assets/js/erpnext.min.js"
 app_include_css = "assets/css/erpnext.css"
