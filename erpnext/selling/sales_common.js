@@ -56,9 +56,7 @@ erpnext.selling.SellingController = erpnext.TransactionController.extend({
 			this.frm.set_query("item_code", "items", function() {
 				return {
 					query: "erpnext.controllers.queries.item_query",
-					filters: (me.frm.doc.order_type === "Maintenance" ?
-						{'is_service_item': 1}:
-						{'is_sales_item': 1	})
+					filters: {'is_sales_item': 1}
 				}
 			});
 		}
@@ -81,10 +79,6 @@ erpnext.selling.SellingController = erpnext.TransactionController.extend({
 					}
 				}
 			});
-		}
-
-		if(this.frm.fields_dict.sales_team && this.frm.fields_dict.sales_team.grid.get_field("sales_person")) {
-			this.frm.set_query("sales_person", "sales_team", erpnext.queries.not_a_group_filter);
 		}
 	},
 
@@ -130,7 +124,8 @@ erpnext.selling.SellingController = erpnext.TransactionController.extend({
 
 		item.rate = flt(item.price_list_rate * (1 - item.discount_percentage / 100.0),
 			precision("rate", item));
-
+		
+		this.set_gross_profit(item);
 		this.calculate_taxes_and_totals();
 	},
 
@@ -141,6 +136,7 @@ erpnext.selling.SellingController = erpnext.TransactionController.extend({
 		} else {
 			this.price_list_rate(doc, cdt, cdn);
 		}
+		this.set_gross_profit(item);
 	},
 
 	commission_rate: function() {
@@ -183,16 +179,21 @@ erpnext.selling.SellingController = erpnext.TransactionController.extend({
 
 	warehouse: function(doc, cdt, cdn) {
 		var me = this;
-		this.batch_no(doc, cdt, cdn);
 		var item = frappe.get_doc(cdt, cdn);
+		
 		if(item.item_code && item.warehouse) {
 			return this.frm.call({
-				method: "erpnext.stock.get_item_details.get_available_qty",
+				method: "erpnext.stock.get_item_details.get_bin_details",
 				child: item,
 				args: {
 					item_code: item.item_code,
 					warehouse: item.warehouse,
 				},
+				callback:function(r){
+					if (inList(['Delivery Note', 'Sales Invoice'], doc.doctype)) {
+						me.batch_no(doc, cdt, cdn);
+					}
+				}
 			});
 		}
 	},
@@ -288,14 +289,32 @@ erpnext.selling.SellingController = erpnext.TransactionController.extend({
 			}
 		}
 		refresh_field('product_bundle_help');
+	},
+
+	make_payment_request: function() {
+		frappe.call({
+			method:"erpnext.accounts.doctype.payment_request.payment_request.make_payment_request",
+			args: {
+				"dt": cur_frm.doc.doctype,
+				"dn": cur_frm.doc.name,
+				"recipient_id": cur_frm.doc.contact_email
+			},
+			callback: function(r) {
+				if(!r.exc){
+					var doc = frappe.model.sync(r.message);
+					console.log(r.message)
+					frappe.set_route("Form", r.message.doctype, r.message.name);
+				}
+			}
+		})
 	}
 });
 
-frappe.ui.form.on(cur_frm.doctype,"project_name", function(frm) {
+frappe.ui.form.on(cur_frm.doctype,"project", function(frm) {
 	if(in_list(["Delivery Note", "Sales Invoice"], frm.doc.doctype)) {
 		frappe.call({
 			method:'erpnext.projects.doctype.project.project.get_cost_center_name' ,
-			args: {	project_name: frm.doc.project_name	},
+			args: {	project: frm.doc.project	},
 			callback: function(r, rt) {
 				if(!r.exc) {
 					$.each(frm.doc["items"] || [], function(i, row) {

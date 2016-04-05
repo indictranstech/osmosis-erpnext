@@ -28,32 +28,15 @@ frappe.ui.form.on("Leave Application", {
 			frm.set_value("status", "Open");
 			frm.trigger("calculate_total_days");
 		}
-
-		frm.set_intro("");
-		if (frm.is_new() && !in_list(user_roles, "HR User")) {
-			frm.set_intro(__("Fill the form and save it"));
-		} else {
-			if(frm.doc.docstatus==0 && frm.doc.status=="Open") {
-				if(user==frm.doc.leave_approver) {
-					frm.set_intro(__("You are the Leave Approver for this record. Please Update the 'Status' and Save"));
-					frm.toggle_enable("status", true);
-				} else {
-					frm.set_intro(__("This Leave Application is pending approval. Only the Leave Approver can update status."))
-					frm.toggle_enable("status", false);
-				}
-			}
-		}
 	},
 
 	leave_approver: function(frm) {
-		frm.set_value("leave_approver_name", frappe.user.full_name(frm.doc.leave_approver));
+		if(frm.doc.leave_approver){
+			frm.set_value("leave_approver_name", frappe.user.full_name(frm.doc.leave_approver));
+		}
 	},
 
 	employee: function(frm) {
-		frm.trigger("get_leave_balance");
-	},
-
-	fiscal_year: function(frm) {
 		frm.trigger("get_leave_balance");
 	},
 
@@ -85,13 +68,19 @@ frappe.ui.form.on("Leave Application", {
 	},
 
 	get_leave_balance: function(frm) {
-		if(frm.doc.docstatus==0 && frm.doc.employee && frm.doc.leave_type && frm.doc.fiscal_year) {
-			return frm.call({
-				method: "get_leave_balance",
+		if(frm.doc.docstatus==0 && frm.doc.employee && frm.doc.leave_type && frm.doc.from_date) {
+			return frappe.call({
+				method: "erpnext.hr.doctype.leave_application.leave_application.get_leave_balance_on",
 				args: {
 					employee: frm.doc.employee,
-					fiscal_year: frm.doc.fiscal_year,
-					leave_type: frm.doc.leave_type
+					date: frm.doc.from_date,
+					leave_type: frm.doc.leave_type,
+					consider_all_leaves_in_the_allocation_period: true
+				},
+				callback: function(r) {
+					if (!r.exc && r.message) {
+						frm.set_value('leave_balance', r.message);
+					}
 				}
 			});
 		}
@@ -101,14 +90,21 @@ frappe.ui.form.on("Leave Application", {
 		if(frm.doc.from_date && frm.doc.to_date) {
 			if (cint(frm.doc.half_day)==1) {
 				frm.set_value("total_leave_days", 0.5);
-			} else {
+			} else if (frm.doc.employee && frm.doc.leave_type){
 				// server call is done to include holidays in leave days calculations
 				return frappe.call({
-					method: 'erpnext.hr.doctype.leave_application.leave_application.get_total_leave_days',
-					args: { leave_app: frm.doc },
-					callback: function(response) {
-						if (response && response.message) {
-							frm.set_value('total_leave_days', response.message.total_leave_days);
+					method: 'erpnext.hr.doctype.leave_application.leave_application.get_number_of_leave_days',
+					args: {
+						"employee": frm.doc.employee,
+						"leave_type": frm.doc.leave_type,
+						"from_date": frm.doc.from_date,
+						"to_date": frm.doc.to_date,
+						"half_day": frm.doc.half_day
+					},
+					callback: function(r) {
+						if (r && r.message) {
+							frm.set_value('total_leave_days', r.message);
+							frm.trigger("get_leave_balance");
 						}
 					}
 				});

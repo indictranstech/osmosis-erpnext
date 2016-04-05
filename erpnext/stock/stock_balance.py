@@ -7,7 +7,6 @@ import frappe
 from frappe.utils import flt, cstr, nowdate, nowtime
 from erpnext.stock.utils import update_bin
 from erpnext.stock.stock_ledger import update_entries_after
-from erpnext.accounts.utils import get_fiscal_year
 
 def repost(only_actual=False, allow_negative_stock=False, allow_zero_rate=False, only_bin=False):
 	"""
@@ -76,10 +75,12 @@ def get_reserved_qty(item_code, warehouse):
 					(
 						select qty from `tabSales Order Item`
 						where name = dnpi.parent_detail_docname
+						and (delivered_by_supplier is null or delivered_by_supplier = 0)
 					) as so_item_qty,
 					(
-						select ifnull(delivered_qty, 0) from `tabSales Order Item`
+						select delivered_qty from `tabSales Order Item`
 						where name = dnpi.parent_detail_docname
+						and delivered_by_supplier = 0
 					) as so_item_delivered_qty,
 					parent, name
 				from
@@ -90,16 +91,17 @@ def get_reserved_qty(item_code, warehouse):
 					and parenttype="Sales Order"
 					and item_code != parent_item
 					and exists (select * from `tabSales Order` so
-					where name = dnpi_in.parent and docstatus = 1 and status != 'Stopped')
+					where name = dnpi_in.parent and docstatus = 1 and status != 'Closed')
 				) dnpi)
 			union
 				(select qty as dnpi_qty, qty as so_item_qty,
-					ifnull(delivered_qty, 0) as so_item_delivered_qty, parent, name
+					delivered_qty as so_item_delivered_qty, parent, name
 				from `tabSales Order Item` so_item
 				where item_code = %s and warehouse = %s
+				and (so_item.delivered_by_supplier is null or so_item.delivered_by_supplier = 0)
 				and exists(select * from `tabSales Order` so
 					where so.name = so_item.parent and so.docstatus = 1
-					and so.status != 'Stopped'))
+					and so.status != 'Closed'))
 			) tab
 		where
 			so_item_qty >= so_item_delivered_qty
@@ -108,29 +110,30 @@ def get_reserved_qty(item_code, warehouse):
 	return flt(reserved_qty[0][0]) if reserved_qty else 0
 
 def get_indented_qty(item_code, warehouse):
-	indented_qty = frappe.db.sql("""select sum(mr_item.qty - ifnull(mr_item.ordered_qty, 0))
+	indented_qty = frappe.db.sql("""select sum(mr_item.qty - mr_item.ordered_qty)
 		from `tabMaterial Request Item` mr_item, `tabMaterial Request` mr
 		where mr_item.item_code=%s and mr_item.warehouse=%s
-		and mr_item.qty > ifnull(mr_item.ordered_qty, 0) and mr_item.parent=mr.name
+		and mr_item.qty > mr_item.ordered_qty and mr_item.parent=mr.name
 		and mr.status!='Stopped' and mr.docstatus=1""", (item_code, warehouse))
 
 	return flt(indented_qty[0][0]) if indented_qty else 0
 
 def get_ordered_qty(item_code, warehouse):
 	ordered_qty = frappe.db.sql("""
-		select sum((po_item.qty - ifnull(po_item.received_qty, 0))*po_item.conversion_factor)
+		select sum((po_item.qty - po_item.received_qty)*po_item.conversion_factor)
 		from `tabPurchase Order Item` po_item, `tabPurchase Order` po
 		where po_item.item_code=%s and po_item.warehouse=%s
-		and po_item.qty > ifnull(po_item.received_qty, 0) and po_item.parent=po.name
-		and po.status!='Stopped' and po.docstatus=1""", (item_code, warehouse))
+		and po_item.qty > po_item.received_qty and po_item.parent=po.name
+		and po.status not in ('Closed', 'Delivered') and po.docstatus=1
+		and po_item.delivered_by_supplier = 0""", (item_code, warehouse))
 
 	return flt(ordered_qty[0][0]) if ordered_qty else 0
 
 def get_planned_qty(item_code, warehouse):
 	planned_qty = frappe.db.sql("""
-		select sum(ifnull(qty, 0) - ifnull(produced_qty, 0)) from `tabProduction Order`
+		select sum(qty - produced_qty) from `tabProduction Order`
 		where production_item = %s and fg_warehouse = %s and status != "Stopped"
-		and docstatus=1 and ifnull(qty, 0) > ifnull(produced_qty, 0)""", (item_code, warehouse))
+		and docstatus=1 and qty > produced_qty""", (item_code, warehouse))
 
 	return flt(planned_qty[0][0]) if planned_qty else 0
 
@@ -154,7 +157,6 @@ def set_stock_balance_as_per_serial_no(item_code=None, posting_date=None, postin
 	 	fiscal_year=None):
 	if not posting_date: posting_date = nowdate()
 	if not posting_time: posting_time = nowtime()
-	if not fiscal_year: fiscal_year = get_fiscal_year(posting_date)[0]
 
 	condition = " and item.name='%s'" % item_code.replace("'", "\'") if item_code else ""
 
@@ -187,7 +189,6 @@ def set_stock_balance_as_per_serial_no(item_code=None, posting_date=None, postin
 			'stock_uom'					: d[3],
 			'incoming_rate'				: sle and flt(serial_nos[0][0]) > flt(d[2]) and flt(sle[0][0]) or 0,
 			'company'					: sle and cstr(sle[0][1]) or 0,
-			'fiscal_year'				: fiscal_year,
 			'is_cancelled'			 	: 'No',
 			'batch_no'					: '',
 			'serial_no'					: ''

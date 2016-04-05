@@ -10,7 +10,8 @@ import frappe.defaults
 
 from erpnext.controllers.buying_controller import BuyingController
 from erpnext.accounts.party import get_party_account, get_due_date
-from erpnext.accounts.utils import get_account_currency
+from erpnext.accounts.utils import get_account_currency, get_fiscal_year
+from erpnext.stock.doctype.purchase_receipt.purchase_receipt import update_billed_amount_based_on_po
 
 form_grid_templates = {
 	"items": "templates/form_grid/item_grid.html"
@@ -48,7 +49,7 @@ class PurchaseInvoice(BuyingController):
 		self.check_conversion_rate()
 		self.validate_credit_to_acc()
 		self.clear_unallocated_advances("Purchase Invoice Advance", "advances")
-		self.check_for_stopped_status()
+		self.check_for_closed_status()
 		self.validate_with_previous_doc()
 		self.validate_uom_is_integer("uom", "qty")
 		self.set_against_expense_account()
@@ -103,14 +104,14 @@ class PurchaseInvoice(BuyingController):
 
 		self.party_account_currency = account.account_currency
 
-	def check_for_stopped_status(self):
+	def check_for_closed_status(self):
 		check_list = []
+		pc_obj = frappe.get_doc('Purchase Common')
+
 		for d in self.get('items'):
 			if d.purchase_order and not d.purchase_order in check_list and not d.purchase_receipt:
 				check_list.append(d.purchase_order)
-				stopped = frappe.db.sql("select name from `tabPurchase Order` where status = 'Stopped' and name = %s", d.purchase_order)
-				if stopped:
-					throw(_("Purchase Order {0} is 'Stopped'").format(d.purchase_order))
+				pc_obj.check_for_closed_status('Purchase Order', d.purchase_order)
 
 	def validate_with_previous_doc(self):
 		super(PurchaseInvoice, self).validate_with_previous_doc({
@@ -120,7 +121,7 @@ class PurchaseInvoice(BuyingController):
 			},
 			"Purchase Order Item": {
 				"ref_dn_field": "po_detail",
-				"compare_fields": [["project_name", "="], ["item_code", "="], ["uom", "="]],
+				"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
 				"is_child_table": True,
 				"allow_duplicate_prev_row_id": True
 			},
@@ -130,7 +131,7 @@ class PurchaseInvoice(BuyingController):
 			},
 			"Purchase Receipt Item": {
 				"ref_dn_field": "pr_detail",
-				"compare_fields": [["project_name", "="], ["item_code", "="], ["uom", "="]],
+				"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
 				"is_child_table": True
 			}
 		})
@@ -150,10 +151,14 @@ class PurchaseInvoice(BuyingController):
 		against_accounts = []
 		stock_items = self.get_stock_items()
 		for item in self.get("items"):
+			# in case of auto inventory accounting,
+			# against expense account is always "Stock Received But Not Billed"
+			# for a stock item and if not epening entry and not drop-ship entry
+
 			if auto_accounting_for_stock and item.item_code in stock_items \
-					and self.is_opening == 'No':
-				# in case of auto inventory accounting, against expense account is always
-				# Stock Received But Not Billed for a stock item
+				and self.is_opening == 'No' and (not item.po_detail or
+					not frappe.db.get_value("Purchase Order Item", item.po_detail, "delivered_by_supplier")):
+
 				item.expense_account = stock_not_billed_account
 				item.cost_center = None
 
@@ -176,9 +181,10 @@ class PurchaseInvoice(BuyingController):
 					 throw(_("Purchse Order number required for Item {0}").format(d.item_code))
 
 	def pr_required(self):
+		stock_items = self.get_stock_items()
 		if frappe.db.get_value("Buying Settings", None, "pr_required") == 'Yes':
 			 for d in self.get('items'):
-				 if not d.purchase_receipt:
+				 if not d.purchase_receipt and d.item_code in stock_items:
 					 throw(_("Purchase Receipt number required for Item {0}").format(d.item_code))
 
 	def validate_write_off_account(self):
@@ -228,8 +234,6 @@ class PurchaseInvoice(BuyingController):
 			reconcile_against_document(lst)
 
 	def on_submit(self):
-		super(PurchaseInvoice, self).on_submit()
-
 		self.check_prev_docstatus()
 
 		frappe.get_doc('Authorization Control').validate_approving_authority(self.doctype,
@@ -241,6 +245,7 @@ class PurchaseInvoice(BuyingController):
 			self.update_against_document_in_jv()
 			self.update_prevdoc_status()
 			self.update_billing_status_for_zero_amount_refdoc("Purchase Order")
+			self.update_billing_status_in_pr()
 
 		self.update_project()
 
@@ -254,15 +259,19 @@ class PurchaseInvoice(BuyingController):
 		gl_entries = []
 
 		# parent's gl entry
-		if self.base_grand_total:
+		if self.grand_total:
+			# Didnot use base_grand_total to book rounding loss gle
+			grand_total_in_company_currency = flt(self.grand_total * self.conversion_rate,
+				self.precision("grand_total"))
+
 			gl_entries.append(
 				self.get_gl_dict({
 					"account": self.credit_to,
 					"party_type": "Supplier",
 					"party": self.supplier,
 					"against": self.against_expense_account,
-					"credit": self.base_grand_total,
-					"credit_in_account_currency": self.base_grand_total \
+					"credit": grand_total_in_company_currency,
+					"credit_in_account_currency": grand_total_in_company_currency \
 						if self.party_account_currency==self.company_currency else self.grand_total,
 					"against_voucher": self.return_against if cint(self.is_return) else self.name,
 					"against_voucher_type": self.doctype,
@@ -394,35 +403,71 @@ class PurchaseInvoice(BuyingController):
 			make_gl_entries(gl_entries, cancel=(self.docstatus == 2))
 
 	def on_cancel(self):
+		self.check_for_closed_status()
+
 		if not self.is_return:
 			from erpnext.accounts.utils import remove_against_link_from_jv
 			remove_against_link_from_jv(self.doctype, self.name)
 
 			self.update_prevdoc_status()
 			self.update_billing_status_for_zero_amount_refdoc("Purchase Order")
+			self.update_billing_status_in_pr()
+
 		self.make_gl_entries_on_cancel()
 		self.update_project()
 
 	def update_project(self):
 		project_list = []
 		for d in self.items:
-			if d.project_name and d.project_name not in project_list:
-				project = frappe.get_doc("Project", d.project_name)
+			if d.project and d.project not in project_list:
+				project = frappe.get_doc("Project", d.project)
 				project.flags.dont_sync_tasks = True
 				project.update_purchase_costing()
 				project.save()
-				project_list.append(d.project_name)
+				project_list.append(d.project)
 
 	def validate_supplier_invoice(self):
 		if self.bill_date:
 			if getdate(self.bill_date) > getdate(self.posting_date):
 				frappe.throw("Supplier Invoice Date cannot be greater than Posting Date")
+
 		if self.bill_no:
 			if cint(frappe.db.get_single_value("Accounts Settings", "check_supplier_invoice_uniqueness")):
-				pi = frappe.db.exists("Purchase Invoice", {"bill_no": self.bill_no,
-					"fiscal_year": self.fiscal_year, "name": ("!=", self.name), "docstatus": ("<", 2)})
+				fiscal_year = get_fiscal_year(self.posting_date, company=self.company, as_dict=True)
+
+				pi = frappe.db.sql('''select name from `tabPurchase Invoice`
+					where
+						bill_no = %(bill_no)s
+						and name != %(name)s
+						and docstatus < 2
+						and posting_date between %(year_start_date)s and %(year_end_date)s''', {
+							"bill_no": self.bill_no,
+							"name": self.name,
+							"year_start_date": fiscal_year.year_start_date,
+							"year_end_date": fiscal_year.year_end_date
+						})
+
 				if pi:
+					pi = pi[0][0]
 					frappe.throw("Supplier Invoice No exists in Purchase Invoice {0}".format(pi))
+
+	def update_billing_status_in_pr(self, update_modified=True):
+		updated_pr = []
+		for d in self.get("items"):
+			if d.pr_detail:
+				billed_amt = frappe.db.sql("""select sum(amount) from `tabPurchase Invoice Item`
+					where pr_detail=%s and docstatus=1""", d.pr_detail)
+				billed_amt = billed_amt and billed_amt[0][0] or 0
+				frappe.db.set_value("Purchase Receipt Item", d.pr_detail, "billed_amt", billed_amt, update_modified=update_modified)
+				updated_pr.append(d.purchase_receipt)
+			elif d.po_detail:
+				updated_pr += update_billed_amount_based_on_po(d.po_detail, update_modified)
+
+		for pr in set(updated_pr):
+			frappe.get_doc("Purchase Receipt", pr).update_billing_percentage(update_modified=update_modified)
+
+	def on_recurring(self, reference_doc):
+		self.due_date = None
 
 @frappe.whitelist()
 def get_expense_account(doctype, txt, searchfield, start, page_len, filters):
@@ -436,10 +481,10 @@ def get_expense_account(doctype, txt, searchfield, start, page_len, filters):
 					or tabAccount.account_type in ("Expense Account", "Fixed Asset", "Temporary"))
 				and tabAccount.is_group=0
 				and tabAccount.docstatus!=2
-				and tabAccount.company = '%(company)s'
-				and tabAccount.%(key)s LIKE '%(txt)s'
-				%(mcond)s""" % {'company': filters['company'], 'key': searchfield,
-			'txt': "%%%s%%" % frappe.db.escape(txt), 'mcond':get_match_cond(doctype)})
+				and tabAccount.company = %(company)s
+				and tabAccount.{key} LIKE %(txt)s
+				{mcond}""".format( key=frappe.db.escape(searchfield), mcond=get_match_cond(doctype) ),
+				{ 'company': filters['company'], 'txt': "%%%s%%" % frappe.db.escape(txt) })
 
 @frappe.whitelist()
 def make_debit_note(source_name, target_doc=None):
