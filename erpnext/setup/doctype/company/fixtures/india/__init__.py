@@ -12,8 +12,8 @@ def install(company):
 		{'doctype': 'Earning Type', 'name': 'House Rent Allowance', 'description': 'House Rent Allowance', 'earning_name': 'House Rent Allowance', 'taxable': 'No'},
 	]
 
-	for d in docs:
-		try:
-			frappe.get_doc(d).insert()
-		except frappe.NameError:
-			pass
+	# for d in docs:
+	# 	try:
+	# 		frappe.get_doc(d).insert()
+	# 	except frappe.NameError:
+	# 		pass

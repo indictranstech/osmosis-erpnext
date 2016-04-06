@@ -23,7 +23,6 @@ class Company(Document):
 					limit 1""" % (doctype, "%s"), self.name):
 						exists = True
 						break
-
 		return exists
 
 	def validate(self):
