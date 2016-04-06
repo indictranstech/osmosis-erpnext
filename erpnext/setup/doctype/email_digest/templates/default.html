@@ -11,6 +11,7 @@
 <div style="max-width: 500px; margin: auto; padding: 20px 0 40px 0">
 
 <h1 style="{{ h1 }}">{{ title }}</h1>
+<h2 style="{{ h2 }}">{{ company }}</h2>
 <h4 style="font-weight: normal; color: {{ text_muted }}; margin-top: 7px; font-size: 16px; margin-top: 7px;">
     <p>{% if frequency == "Daily" %}
         {{ frappe.format_date(future_from_date) }}
@@ -75,7 +76,7 @@
         <table style="width: 100%;">
             <tr>
                 <td>
-                    <a style="{{ link_css }}" href="{{ t.link }}">{{ t.description }}</a>
+                    <a style="{{ link_css }}" href="{{ t.link }}">{{ _(t.description) }}</a>
                 </td>
                 <td style="width: 25%; text-align: right">
                     <span style="{{ label_css }}">
@@ -98,7 +99,7 @@
         <table style="width: 100%;">
             <tr>
                 <td>
-                    <a style="{{ link_css }}" href="{{ n.link }}">{{ n.key }}</a>
+                    <a style="{{ link_css }}" href="{{ n.link }}">{{ _(n.key) }}</a>
                 </td>
                 <td style="width: 25%; text-align: right">
                     <span style="{{ label_css }}">
@@ -114,10 +115,11 @@
 
 {% endif %}
 
+{% if add_quote %}
 <div style="text-align: center; margin: 50px; line-height: 1.5">
     {{ quote.text }}<br><i>- {{ quote.author }}</i>
-    <br><br><br>
-    <span style="color: {{ text_muted }}; font-size: 12px;">Have an intersting thought, quote to share? Email it at hello@erpnext.com</span>
+    <br>
 </div>
+{% endif %}
 
 </div>

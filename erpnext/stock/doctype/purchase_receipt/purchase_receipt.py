@@ -11,6 +11,7 @@ import frappe.defaults
 
 from erpnext.controllers.buying_controller import BuyingController
 from erpnext.accounts.utils import get_account_currency
+from frappe.desk.notifications import clear_doctype_notifications
 
 form_grid_templates = {
 	"items": "templates/form_grid/item_grid.html"
@@ -45,13 +46,6 @@ class PurchaseReceipt(BuyingController):
 			'extra_cond': """ and exists (select name from `tabPurchase Receipt` where name=`tabPurchase Receipt Item`.parent and is_return=1)"""
 		}]
 
-	def onload(self):
-		billed_qty = frappe.db.sql("""select sum(ifnull(qty, 0)) from `tabPurchase Invoice Item`
-			where purchase_receipt=%s and docstatus=1""", self.name)
-		if billed_qty:
-			total_qty = sum((item.qty for item in self.get("items")))
-			self.get("__onload").billing_complete = (billed_qty[0][0] == total_qty)
-
 	def validate(self):
 		super(PurchaseReceipt, self).validate()
 
@@ -67,7 +61,7 @@ class PurchaseReceipt(BuyingController):
 
 		pc_obj = frappe.get_doc('Purchase Common')
 		pc_obj.validate_for_items(self)
-		self.check_for_stopped_status(pc_obj)
+		self.check_for_closed_status(pc_obj)
 
 		# sub-contracting
 		self.validate_for_subcontracting()
@@ -78,7 +72,7 @@ class PurchaseReceipt(BuyingController):
 
 	def set_landed_cost_voucher_amount(self):
 		for d in self.get("items"):
-			lc_voucher_amount = frappe.db.sql("""select sum(ifnull(applicable_charges, 0))
+			lc_voucher_amount = frappe.db.sql("""select sum(applicable_charges)
 				from `tabLanded Cost Item`
 				where docstatus = 1 and purchase_receipt_item = %s""", d.name)
 			d.landed_cost_voucher_amount = lc_voucher_amount[0][0] if lc_voucher_amount else 0.0
@@ -95,7 +89,7 @@ class PurchaseReceipt(BuyingController):
 			if flt(d.rejected_qty) and not d.rejected_warehouse:
 				d.rejected_warehouse = self.rejected_warehouse
 				if not d.rejected_warehouse:
-					frappe.throw(_("Rejected Warehouse is mandatory against regected item"))
+					frappe.throw(_("Row #{0}: Rejected Warehouse is mandatory against rejected Item {1}").format(d.idx, d.item_code))
 
 	# validate accepted and rejected qty
 	def validate_accepted_rejected_qty(self):
@@ -122,7 +116,7 @@ class PurchaseReceipt(BuyingController):
 			},
 			"Purchase Order Item": {
 				"ref_dn_field": "prevdoc_detail_docname",
-				"compare_fields": [["project_name", "="], ["uom", "="], ["item_code", "="]],
+				"compare_fields": [["project", "="], ["uom", "="], ["item_code", "="]],
 				"is_child_table": True
 			}
 		})
@@ -183,8 +177,8 @@ class PurchaseReceipt(BuyingController):
 			if po and po_item_rows:
 				po_obj = frappe.get_doc("Purchase Order", po)
 
-				if po_obj.status in ["Stopped", "Cancelled"]:
-					frappe.throw(_("{0} {1} is cancelled or stopped").format(_("Purchase Order"), po),
+				if po_obj.status in ["Closed", "Cancelled"]:
+					frappe.throw(_("{0} {1} is cancelled or closed").format(_("Purchase Order"), po),
 						frappe.InvalidStatusError)
 
 				po_obj.update_ordered_qty(po_item_rows)
@@ -218,13 +212,13 @@ class PurchaseReceipt(BuyingController):
 				if self.docstatus==1:
 					raise frappe.ValidationError
 
-	# Check for Stopped status
-	def check_for_stopped_status(self, pc_obj):
+	# Check for Closed status
+	def check_for_closed_status(self, pc_obj):
 		check_list =[]
 		for d in self.get('items'):
 			if d.meta.get_field('prevdoc_docname') and d.prevdoc_docname and d.prevdoc_docname not in check_list:
 				check_list.append(d.prevdoc_docname)
-				pc_obj.check_for_stopped_status(d.prevdoc_doctype, d.prevdoc_docname)
+				pc_obj.check_for_closed_status(d.prevdoc_doctype, d.prevdoc_docname)
 
 	# on submit
 	def on_submit(self):
@@ -238,6 +232,8 @@ class PurchaseReceipt(BuyingController):
 
 		self.update_prevdoc_status()
 		self.update_ordered_qty()
+
+		self.update_billing_status()
 
 		if not self.is_return:
 			purchase_controller.update_last_purchase_rate(self, 1)
@@ -260,7 +256,7 @@ class PurchaseReceipt(BuyingController):
 	def on_cancel(self):
 		pc_obj = frappe.get_doc('Purchase Common')
 
-		self.check_for_stopped_status(pc_obj)
+		self.check_for_closed_status(pc_obj)
 		# Check if Purchase Invoice has been submitted against current Purchase Order
 		submitted = frappe.db.sql("""select t1.name
 			from `tabPurchase Invoice` t1,`tabPurchase Invoice Item` t2
@@ -276,6 +272,8 @@ class PurchaseReceipt(BuyingController):
 		self.update_prevdoc_status()
 		# Must be called after updating received qty in PO
 		self.update_ordered_qty()
+
+		self.update_billing_status()
 
 		if not self.is_return:
 			pc_obj.update_last_purchase_rate(self, 0)
@@ -427,6 +425,58 @@ class PurchaseReceipt(BuyingController):
 
 		return process_gl_map(gl_entries)
 
+	def update_status(self, status):
+		self.set_status(update=True, status = status)
+		self.notify_update()
+		clear_doctype_notifications(self)
+
+	def update_billing_status(self, update_modified=True):
+		updated_pr = [self.name]
+		for d in self.get("items"):
+			if d.prevdoc_detail_docname:
+				updated_pr += update_billed_amount_based_on_po(d.prevdoc_detail_docname, update_modified)
+
+		for pr in set(updated_pr):
+			pr_doc = self if (pr == self.name) else frappe.get_doc("Purchase Receipt", pr)
+			pr_doc.update_billing_percentage(update_modified=update_modified)
+
+		self.load_from_db()
+
+def update_billed_amount_based_on_po(po_detail, update_modified=True):
+	# Billed against Sales Order directly
+	billed_against_po = frappe.db.sql("""select sum(amount) from `tabPurchase Invoice Item`
+		where po_detail=%s and (pr_detail is null or pr_detail = '') and docstatus=1""", po_detail)
+	billed_against_po = billed_against_po and billed_against_po[0][0] or 0
+
+	# Get all Delivery Note Item rows against the Sales Order Item row
+	pr_details = frappe.db.sql("""select pr_item.name, pr_item.amount, pr_item.parent
+		from `tabPurchase Receipt Item` pr_item, `tabPurchase Receipt` pr
+		where pr.name=pr_item.parent and pr_item.prevdoc_detail_docname=%s
+			and pr.docstatus=1 and pr.is_return = 0
+		order by pr.posting_date asc, pr.posting_time asc, pr.name asc""", po_detail, as_dict=1)
+
+	updated_pr = []
+	for pr_item in pr_details:
+		# Get billed amount directly against Purchase Receipt
+		billed_amt_agianst_pr = frappe.db.sql("""select sum(amount) from `tabPurchase Invoice Item`
+			where pr_detail=%s and docstatus=1""", pr_item.name)
+		billed_amt_agianst_pr = billed_amt_agianst_pr and billed_amt_agianst_pr[0][0] or 0
+
+		# Distribute billed amount directly against PO between PRs based on FIFO
+		if billed_against_po and billed_amt_agianst_pr < pr_item.amount:
+			pending_to_bill = flt(pr_item.amount) - billed_amt_agianst_pr
+			if pending_to_bill <= billed_against_po:
+				billed_amt_agianst_pr += pending_to_bill
+				billed_against_po -= pending_to_bill
+			else:
+				billed_amt_agianst_pr += billed_against_po
+				billed_against_po = 0
+
+		frappe.db.set_value("Purchase Receipt Item", pr_item.name, "billed_amt", billed_amt_agianst_pr, update_modified=update_modified)
+
+		updated_pr.append(pr_item.parent)
+
+	return updated_pr
 
 @frappe.whitelist()
 def make_purchase_invoice(source_name, target_doc=None):
@@ -461,7 +511,7 @@ def make_purchase_invoice(source_name, target_doc=None):
 				"prevdoc_docname": "purchase_order",
 			},
 			"postprocess": update_item,
-			"filter": lambda d: d.qty - invoiced_qty_map.get(d.name, 0)<=0
+			"filter": lambda d: abs(d.qty) - abs(invoiced_qty_map.get(d.name, 0))<=0
 		},
 		"Purchase Taxes and Charges": {
 			"doctype": "Purchase Taxes and Charges",
@@ -487,3 +537,9 @@ def get_invoiced_qty_map(purchase_receipt):
 def make_purchase_return(source_name, target_doc=None):
 	from erpnext.controllers.sales_and_purchase_return import make_return_doc
 	return make_return_doc("Purchase Receipt", source_name, target_doc)
+
+
+@frappe.whitelist()
+def update_purchase_receipt_status(docname, status):
+	pr = frappe.get_doc("Purchase Receipt", docname)
+	pr.update_status(status)

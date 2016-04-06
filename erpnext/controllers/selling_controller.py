@@ -6,7 +6,7 @@ import frappe
 from frappe.utils import cint, flt, cstr, comma_or
 from erpnext.setup.utils import get_company_currency
 from frappe import _, throw
-from erpnext.stock.get_item_details import get_available_qty
+from erpnext.stock.get_item_details import get_bin_details
 
 from erpnext.controllers.stock_controller import StockController
 
@@ -24,7 +24,7 @@ class SellingController(StockController):
 	def onload(self):
 		if self.doctype in ("Sales Order", "Delivery Note", "Sales Invoice"):
 			for item in self.get("items"):
-				item.update(get_available_qty(item.item_code,
+				item.update(get_bin_details(item.item_code,
 					item.warehouse))
 
 	def validate(self):
@@ -161,7 +161,7 @@ class SellingController(StockController):
 		for d in self.get("items"):
 			if d.qty is None:
 				frappe.throw(_("Row {0}: Qty is mandatory").format(d.idx))
-														
+
 			if self.has_product_bundle(d.item_code):
 				for p in self.get("packed_items"):
 					if p.parent_detail_docname == d.name and p.parent_item == d.item_code:
@@ -199,17 +199,17 @@ class SellingController(StockController):
 			where so_detail = %s and docstatus = 1
 			and against_sales_order = %s
 			and parent != %s""", (so_detail, so, current_docname))
-			
-		delivered_via_si = frappe.db.sql("""select sum(si_item.qty) 
+
+		delivered_via_si = frappe.db.sql("""select sum(si_item.qty)
 			from `tabSales Invoice Item` si_item, `tabSales Invoice` si
-			where si_item.parent = si.name and ifnull(si.update_stock, 0) = 1
-			and si_item.so_detail = %s and si.docstatus = 1 
+			where si_item.parent = si.name and si.update_stock = 1
+			and si_item.so_detail = %s and si.docstatus = 1
 			and si_item.sales_order = %s
 			and si.name != %s""", (so_detail, so, current_docname))
-			
+
 		total_delivered_qty = (flt(delivered_via_dn[0][0]) if delivered_via_dn else 0) \
 			+ (flt(delivered_via_si[0][0]) if delivered_via_si else 0)
-		
+
 		return total_delivered_qty
 
 	def get_so_qty_and_warehouse(self, so_detail):
@@ -219,21 +219,21 @@ class SellingController(StockController):
 		so_warehouse = so_item and so_item[0]["warehouse"] or ""
 		return so_qty, so_warehouse
 
-	def check_stop_sales_order(self, ref_fieldname):
+	def check_close_sales_order(self, ref_fieldname):
 		for d in self.get("items"):
 			if d.get(ref_fieldname):
 				status = frappe.db.get_value("Sales Order", d.get(ref_fieldname), "status")
-				if status == "Stopped":
-					frappe.throw(_("Sales Order {0} is stopped").format(d.get(ref_fieldname)))
+				if status == "Closed":
+					frappe.throw(_("Sales Order {0} is {1}").format(d.get(ref_fieldname), status))
 
 def check_active_sales_items(obj):
 	for d in obj.get("items"):
 		if d.item_code:
 			item = frappe.db.sql("""select docstatus, is_sales_item,
-				is_service_item, income_account from tabItem where name = %s""",
+				income_account from tabItem where name = %s""",
 				d.item_code, as_dict=True)[0]
-			if item.is_sales_item == 0 and item.is_service_item == 0:
-				frappe.throw(_("Item {0} must be Sales or Service Item in {1}").format(d.item_code, d.idx))
+			if item.is_sales_item == 0:
+				frappe.throw(_("Item {0} must be a Sales Item in {1}").format(d.item_code, d.idx))
 			if getattr(d, "income_account", None) and not item.income_account:
 				frappe.db.set_value("Item", d.item_code, "income_account",
 					d.income_account)

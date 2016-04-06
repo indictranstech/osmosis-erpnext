@@ -8,14 +8,14 @@ def get_notification_config():
 		{
 			"Issue": {"status": "Open"},
 			"Warranty Claim": {"status": "Open"},
-			"Task": {"status": "Open"},
+			"Task": {"status": "Overdue"},
 			"Project": {"status": "Open"},
 			"Lead": {"status": "Open"},
 			"Contact": {"status": "Open"},
 			"Opportunity": {"status": "Open"},
 			"Quotation": {"docstatus": 0},
 			"Sales Order": {
-				"status": ("not in", ("Stopped", "Completed")),
+				"status": ("not in", ("Completed", "Closed")),
 				"docstatus": ("<", 2)
 			},
 			"Journal Entry": {"docstatus": 0},
@@ -27,9 +27,13 @@ def get_notification_config():
 			"Purchase Receipt": {"docstatus": 0},
 			"Delivery Note": {"docstatus": 0},
 			"Stock Entry": {"docstatus": 0},
-			"Material Request": {"docstatus": 0},
+			"Material Request": {
+				"docstatus": ("<", 2),
+				"status": ("not in", ("Stopped",)),
+				"per_ordered": ("<", 100)
+			},
 			"Purchase Order": {
-				"status": ("not in", ("Stopped", "Completed")),
+				"status": ("not in", ("Completed", "Closed")),
 				"docstatus": ("<", 2)
 			},
 			"Production Order": { "status": "In Process" },
