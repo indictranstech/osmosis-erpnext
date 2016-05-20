@@ -1,6 +1,7 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // License: GNU General Public License v3. See license.txt
-
+{% include 'osmosis/custom_js_methods.js' %}
+{% include 'osmosis/maintenance_schedule.js' %}
 frappe.provide("erpnext.support");
 
 frappe.ui.form.on_change("Maintenance Schedule", "customer", function(frm) {
