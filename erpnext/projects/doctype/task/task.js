@@ -68,4 +68,4 @@ frappe.ui.form.on("Task", {
 
 });
 
-cur_frm.add_fetch('task', 'subject', 'subject');
+

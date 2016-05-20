@@ -2,6 +2,7 @@
 // License: GNU General Public License v3. See license.txt
 
 // print heading
+{% include 'osmosis/custom_js_methods.js' %}
 cur_frm.pformat.print_heading = 'Invoice';
 
 {% include 'selling/sales_common.js' %};
