@@ -1,6 +1,6 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // License: GNU General Public License v3. See license.txt
-
+{% include 'osmosis/custom_js_methods.js' %}
 {% include 'selling/sales_common.js' %};
 
 frappe.provide("erpnext.stock");
